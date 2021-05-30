@@ -3,65 +3,177 @@
 <html>
 
   </head>
-    <title>Hello Plugins!</title>
+    <title>Unlock Protocol Assets Snap</title>
   </head>
 
   <body>
-    <h1>Hello Plugins!</h1>
-    <details>
-      <summary>Instructions</summary>
-      <ul>
-        <li>First, click "Connect". Then, try out the other buttons!</li>
-        <li>Please note that:</li>
-        <ul>
-          <li>
-            The Snap <b>package.json</b> must be located in located in the server root directory
-          </li>
-          <li>
-            The Snap bundle must be hosted at the location specified by <b>package.json:web3Wallet:bundle:url</b>
-          </li>
-        </ul>
-      </ul>
-    </details>
-    <br/>
+    <h1>Unlock Protocol Assets Snap</h1>
 
     <button class="connect">Connect</button>
-    <button class="sendHello">Send Hello</button>
+    <button class="sendAddAssets">Add Unlock Protocol Assets</button>
+
+    <p>Accounts: <span id="accounts"></span></p>
+    <p>Network: <span id="network"></span></p>
   </body>
 
   <script>
-
+    let accounts, subgraphURL
     const origin = new URL('package.json', window.location.href).toString()
     const snapId = `wallet_plugin_${origin}`
+    const accountsDiv = document.getElementById('accounts')
+    const networkDiv = document.getElementById('network')
 
-    const connectButton = document.querySelector('button.connect')
-    const sendButton = document.querySelector('button.sendHello')
+    const isMetaMaskInstalled = () => {
+        const { ethereum } = window
+        return Boolean(ethereum && ethereum.isMetaMask)
+      }
+    const isMetaMaskConnected = () => accounts && accounts.length > 0
 
-    connectButton.addEventListener('click', connect)
-    sendButton.addEventListener('click', send)
+    const init = async () => {
+      
+      const handleNewAccounts = (newAccounts) => {
+        accounts = newAccounts
+        accountsDiv.innerHTML = accounts;
+        if (isMetaMaskConnected()) {
+          console.log('MetaMask is connected', accounts);
+        }
+      }
 
-    async function connect () {
+      const handleNewNetwork = (networkId) => {
+        networkDiv.innerHTML = networkId
+        console.log('networkId', networkId);
+        switch (networkId) {
+          case '1':
+            subgraphURL = 'https://api.thegraph.com/subgraphs/name/unlock-protocol/unlock';
+            break;
+          case '4':
+            subgraphURL = 'https://api.thegraph.com/subgraphs/name/unlock-protocol/unlock-rinkeby';
+            break;
+          case '0x64':
+            subgraphURL = 'https://api.thegraph.com/subgraphs/name/unlock-protocol/xdai';
+            break;
+          case 'loading':
+            subgraphURL = '';
+            break;
+          default: 
+            subgraphURL = '';
+            alert(`Missing subgraph for network ${networkId}`)
+            break;
+        }   
+      }
+
+      const getNetworkId = async () => {
+        try {
+          const networkId = await ethereum.send({
+            method: 'net_version',
+          })
+          if(typeof networkId === 'string') {
+            handleNewNetwork(networkId)
+          }
+          
+        } catch (err) {
+          console.error(err)
+        }
+      }
+
+      if (isMetaMaskInstalled()) {
+        ethereum.autoRefreshOnNetworkChange = false
+        getNetworkId()
+
+        ethereum.on('networkChanged', handleNewNetwork)
+        ethereum.on('accountsChanged', handleNewAccounts)
+
+        try {
+          const newAccounts = await ethereum.send({
+            method: 'eth_accounts',
+          })
+          handleNewAccounts(newAccounts)
+        } catch (err) {
+          console.error('Error on init when getting accounts', err)
+        }
+      }
+    }
+
+    const connect = async () => {
       await ethereum.send({
         method: 'wallet_requestPermissions',
         params: [{
           [snapId]: {}
         }]
       })
+
+      accounts = await ethereum.send({
+        method: 'eth_requestAccounts',
+      })
     }
 
-    async function send () {
+
+    const sendAddAssets = async () => {
+      let keys, locks // assets from Unlock Protocol
+
       try {
-        const response = await ethereum.send({
-          method: snapId,
-          params: [{
-            method: 'hello'
-          }]
-        })
+        if(accounts[0]) {
+          // Fetch keys and locks via subgraph
+          fetch(subgraphURL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({query: `{
+              keyHolders(where : {address: "${accounts[0]}"}){
+                  keys{
+                    lock{
+                      address
+                      name
+                    }
+                    keyId
+                    tokenURI
+                  }
+                },
+                lockManagers(where : {address: "${accounts[0]}"}){
+                  lock{
+                    address
+                    name
+                  }
+                }
+            }`})
+          })
+            .then(r => r.json())
+            .then(async ({ data }) => {
+              console.log('data returned:', data);
+              keys = data.keyHolders.length > 0
+                ? data.keyHolders[0].keys
+                : [];
+              locks = data.lockManagers.map(({ lock }) => lock)
+
+              // Add assets to MetaMask
+              try {
+                await ethereum.send({
+                  method: snapId,
+                  params: [{
+                    method: 'addUnlockAssets',
+                    params: [ locks, keys ]
+                  }]
+                })
+              } catch (err) {
+                console.error(err)
+                alert('Problem happened: ' + err.message || err)
+              }
+            });
+        }
       } catch (err) {
         console.error(err)
-        alert('Problem happened: ' + err.message || err)
       }
     }
+
+    const connectButton = document.querySelector('button.connect')
+    const sendAddAssetsButton = document.querySelector('button.sendAddAssets')  
+
+    connectButton.addEventListener('click', connect)
+    sendAddAssetsButton.addEventListener('click', sendAddAssets)
+
+    init();
 
   </script>
 

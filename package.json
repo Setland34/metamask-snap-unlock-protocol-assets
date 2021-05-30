@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
-    "snaps-cli": "undefined0.4.1"
+    "snaps-cli": "^0.4.1"
   },
   "devDependencies": {},
   "scripts": {
@@ -18,7 +18,7 @@
       "url": "http://localhost:8081/dist/bundle.js"
     },
     "initialPermissions": {
-      "alert": {}
+      "wallet_manageAssets": {}
     }
   }
 }
